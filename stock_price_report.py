@@ -40,6 +40,10 @@ class Snapshot:
     sma20: float
     sma50: float
     rsi14: float
+    macd: float
+    macd_signal: float
+    macd_histogram: float
+    macd_status: str
     chart: Path
 
 
@@ -57,6 +61,29 @@ def rsi(close: pd.Series, period: int = 14) -> float:
     return float((100 - 100 / (1 + gains / losses)).iloc[-1])
 
 
+def macd_values(close: pd.Series) -> tuple[pd.Series, pd.Series, pd.Series]:
+    """Standard MACD: 12-period EMA minus 26-period EMA, with a 9-period signal."""
+    macd = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
+    signal = macd.ewm(span=9, adjust=False).mean()
+    return macd, signal, macd - signal
+
+
+def macd_status(macd: pd.Series, signal: pd.Series) -> str:
+    current, previous = macd.iloc[-1], macd.iloc[-2]
+    signal_now, signal_previous = signal.iloc[-1], signal.iloc[-2]
+    if current > signal_now and previous <= signal_previous:
+        return "金叉 ↑（偏多）"
+    if current < signal_now and previous >= signal_previous:
+        return "死叉 ↓（偏空）"
+    if current > signal_now and current > 0:
+        return "多头 ↑"
+    if current > signal_now:
+        return "转强 ↑"
+    if current < signal_now and current < 0:
+        return "空头 ↓"
+    return "转弱 ↓"
+
+
 def get_history(ticker: str) -> pd.DataFrame:
     data = yf.Ticker(ticker).history(period="1y", interval="1d", auto_adjust=False)
     data = data.dropna(subset=["Open", "High", "Low", "Close"])
@@ -69,8 +96,12 @@ def draw_chart(ticker: str, data: pd.DataFrame) -> Path:
     daily = data.tail(63).copy()
     daily["SMA20"] = data["Close"].rolling(20).mean().tail(63)
     daily["SMA50"] = data["Close"].rolling(50).mean().tail(63)
-    fig, (price_axis, volume_axis) = plt.subplots(
-        2, 1, figsize=(12, 7), sharex=True, gridspec_kw={"height_ratios": [4, 1]}
+    macd, signal, histogram = macd_values(data.Close)
+    daily["MACD"] = macd.tail(63)
+    daily["Signal"] = signal.tail(63)
+    daily["Histogram"] = histogram.tail(63)
+    fig, (price_axis, macd_axis, volume_axis) = plt.subplots(
+        3, 1, figsize=(12, 8.5), sharex=True, gridspec_kw={"height_ratios": [4, 1.25, 1]}
     )
     for timestamp, row in daily.iterrows():
         x = mdates.date2num(timestamp.to_pydatetime())
@@ -84,6 +115,13 @@ def draw_chart(ticker: str, data: pd.DataFrame) -> Path:
     price_axis.set_ylabel("Price")
     price_axis.grid(alpha=0.2)
     price_axis.legend(loc="upper left")
+    macd_axis.axhline(0, color="#64748b", linewidth=0.8)
+    macd_axis.bar(daily.index, daily.Histogram, color=["#16a34a" if value >= 0 else "#dc2626" for value in daily.Histogram], width=0.7, alpha=0.75)
+    macd_axis.plot(daily.index, daily.MACD, color="#2563eb", linewidth=1.3, label="MACD")
+    macd_axis.plot(daily.index, daily.Signal, color="#f59e0b", linewidth=1.3, label="Signal (9)")
+    macd_axis.set_ylabel("MACD")
+    macd_axis.grid(alpha=0.15)
+    macd_axis.legend(loc="upper left", ncol=2)
     volume_axis.set_ylabel("Volume")
     volume_axis.grid(alpha=0.15)
     volume_axis.xaxis.set_major_locator(mdates.WeekdayLocator(interval=2))
@@ -101,6 +139,7 @@ def snapshot(ticker: str) -> Snapshot:
     data = get_history(ticker)
     last = data.iloc[-1]
     week = data.tail(5)
+    macd, signal, histogram = macd_values(data.Close)
     return Snapshot(
         ticker=ticker,
         date=data.index[-1].strftime("%Y-%m-%d"),
@@ -110,7 +149,10 @@ def snapshot(ticker: str) -> Snapshot:
         change=(float(last.Close) / float(data.Close.iloc[-2]) - 1) * 100,
         sma20=float(data.Close.rolling(20).mean().iloc[-1]),
         sma50=float(data.Close.rolling(50).mean().iloc[-1]),
-        rsi14=rsi(data.Close), chart=draw_chart(ticker, data),
+        rsi14=rsi(data.Close),
+        macd=float(macd.iloc[-1]), macd_signal=float(signal.iloc[-1]),
+        macd_histogram=float(histogram.iloc[-1]), macd_status=macd_status(macd, signal),
+        chart=draw_chart(ticker, data),
     )
 
 
@@ -122,6 +164,7 @@ def html_report(items: list[Snapshot], failed: list[str]) -> str:
     rows = []
     for item in items:
         color = "#15803d" if item.change >= 0 else "#b91c1c"
+        macd_color = "#15803d" if "↑" in item.macd_status else "#b91c1c"
         rows.append(
             f"<tr><td><b>{html.escape(item.ticker)}</b></td><td>{item.date}</td>"
             f"<td>{price(item.open)}</td><td><b>{price(item.close)}</b></td>"
@@ -129,7 +172,9 @@ def html_report(items: list[Snapshot], failed: list[str]) -> str:
             f"<td>{price(item.high)} / {price(item.low)}</td>"
             f"<td>{price(item.high_52w)} / {price(item.low_52w)}</td>"
             f"<td>{price(item.high_1w)} / {price(item.low_1w)}</td>"
-            f"<td>{price(item.sma20)} / {price(item.sma50)}</td><td>{item.rsi14:.1f}</td></tr>"
+            f"<td>{price(item.sma20)} / {price(item.sma50)}</td><td>{item.rsi14:.1f}</td>"
+            f"<td>{item.macd:.2f} / {item.macd_signal:.2f} / {item.macd_histogram:.2f}</td>"
+            f"<td style='color:{macd_color}'><b>{item.macd_status}</b></td></tr>"
         )
     charts = "".join(
         f"<section><h2>{html.escape(item.ticker)} 近 3 个月日线</h2><img src='cid:{item.ticker.lower()}-chart' alt='{html.escape(item.ticker)} 日线图'></section>"
@@ -144,7 +189,7 @@ td{{border-bottom:1px solid #e5e7eb;text-align:right;padding:9px 8px;white-space
 tr:nth-child(even){{background:#f8fafc}} img{{width:100%;max-width:960px;border:1px solid #e5e7eb;border-radius:8px}} section{{margin-top:30px}}
 .warning{{color:#b45309;background:#fffbeb;padding:10px;border-radius:6px}}
 </style></head><body><h1>股票价格日报</h1><p class='muted'>生成时间：{now}（数据为最近可用交易日收盘数据）</p>{problems}
-<table><thead><tr><th>代码</th><th>交易日</th><th>开盘</th><th>收盘</th><th>日涨跌</th><th>日高 / 日低</th><th>52 周高 / 低</th><th>1 周高 / 低</th><th>SMA20 / SMA50</th><th>RSI14</th></tr></thead><tbody>{''.join(rows)}</tbody></table>{charts}</body></html>"""
+<table><thead><tr><th>代码</th><th>交易日</th><th>开盘</th><th>收盘</th><th>日涨跌</th><th>日高 / 日低</th><th>52 周高 / 低</th><th>1 周高 / 低</th><th>SMA20 / SMA50</th><th>RSI14</th><th>MACD / Signal / 柱</th><th>MACD 状态</th></tr></thead><tbody>{''.join(rows)}</tbody></table>{charts}</body></html>"""
 
 
 def send_mail(subject: str, body: str, items: list[Snapshot]) -> None:
