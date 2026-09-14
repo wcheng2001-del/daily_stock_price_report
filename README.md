@@ -18,6 +18,12 @@
 STOCK_LIST=AVGO,AAPL,TSLA
 ```
 
+新增的 `STOCK_A` 工作流使用独立清单，因此请另建：
+
+```text
+STOCK_A_LIST=NVDA,MSFT
+```
+
 也可以从 **Actions → 每日股票价格报告 → Run workflow** 临时输入股票清单。
 
 ## 设定寄信
@@ -34,6 +40,7 @@ EMAIL_TO=收件人地址（多个地址请以逗号分隔）
 ```
 
 邮件主题为：`[daily_stock_price_report] 股票价格日报 - YYYY-MM-DD`。
+`STOCK_A` 的主题会额外标示为 `[STOCK_A]`。
 
 ## 排程
 

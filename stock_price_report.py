@@ -160,7 +160,7 @@ def price(value: float) -> str:
     return f"{value:,.2f}"
 
 
-def html_report(items: list[Snapshot], failed: list[str]) -> str:
+def html_report(items: list[Snapshot], failed: list[str], label: str) -> str:
     rows = []
     for item in items:
         color = "#15803d" if item.change >= 0 else "#b91c1c"
@@ -188,7 +188,7 @@ table{{width:100%;border-collapse:collapse;font-size:13px;margin:20px 0}} th{{ba
 td{{border-bottom:1px solid #e5e7eb;text-align:right;padding:9px 8px;white-space:nowrap}} th:first-child,th:nth-child(2),td:first-child,td:nth-child(2){{text-align:left}}
 tr:nth-child(even){{background:#f8fafc}} img{{width:100%;max-width:960px;border:1px solid #e5e7eb;border-radius:8px}} section{{margin-top:30px}}
 .warning{{color:#b45309;background:#fffbeb;padding:10px;border-radius:6px}}
-</style></head><body><h1>股票价格日报</h1><p class='muted'>生成时间：{now}（数据为最近可用交易日收盘数据）</p>{problems}
+</style></head><body><h1>{html.escape(label)} 股票价格日报</h1><p class='muted'>生成时间：{now}（数据为最近可用交易日收盘数据）</p>{problems}
 <table><thead><tr><th>代码</th><th>交易日</th><th>开盘</th><th>收盘</th><th>日涨跌</th><th>日高 / 日低</th><th>52 周高 / 低</th><th>1 周高 / 低</th><th>SMA20 / SMA50</th><th>RSI14</th><th>MACD / Signal / 柱</th><th>MACD 状态</th></tr></thead><tbody>{''.join(rows)}</tbody></table>{charts}</body></html>"""
 
 
@@ -213,6 +213,7 @@ def send_mail(subject: str, body: str, items: list[Snapshot]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stocks", default=os.getenv("STOCK_LIST", "AVGO"))
+    parser.add_argument("--label", default=os.getenv("REPORT_LABEL", "DAILY"), help="report and email label")
     parser.add_argument("--send-email", action="store_true")
     args = parser.parse_args()
     items, failed = [], []
@@ -225,13 +226,13 @@ def main() -> int:
             print(f"Failed: {ticker} — {error}")
     if not items:
         raise RuntimeError("no stock reports could be generated: " + "; ".join(failed))
-    body = html_report(items, failed)
+    body = html_report(items, failed, args.label)
     REPORT_DIR.mkdir(exist_ok=True)
     report = REPORT_DIR / f"stock_price_report_{datetime.now():%Y%m%d}.html"
     report.write_text(body, encoding="utf-8")
     print(f"Report generated: {report}")
     if args.send_email:
-        send_mail(f"[daily_stock_price_report] 股票价格日报 - {datetime.now():%Y-%m-%d}", body, items)
+        send_mail(f"[daily_stock_price_report][{args.label}] 股票价格日报 - {datetime.now():%Y-%m-%d}", body, items)
         print("Email sent successfully")
     return 0
 
