@@ -6,6 +6,7 @@ import argparse
 import html
 import os
 import smtplib
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from email.message import EmailMessage
@@ -47,8 +48,22 @@ class Snapshot:
     chart: Path
 
 
+def normalize_yahoo_ticker(ticker: str) -> str:
+    """Add Yahoo Finance exchange suffixes for unqualified Chinese A-share codes."""
+    symbol = ticker.strip().upper()
+    if not re.fullmatch(r"\d{6}", symbol):
+        return symbol
+    if symbol.startswith("6"):
+        return f"{symbol}.SS"  # Shanghai Stock Exchange
+    if symbol.startswith(("0", "3")):
+        return f"{symbol}.SZ"  # Shenzhen Stock Exchange
+    if symbol.startswith(("4", "8")):
+        return f"{symbol}.BJ"  # Beijing Stock Exchange
+    return symbol
+
+
 def parse_tickers(raw: str) -> list[str]:
-    tickers = [item.strip().upper() for item in raw.replace("\n", ",").split(",") if item.strip()]
+    tickers = [normalize_yahoo_ticker(item) for item in raw.replace("\n", ",").split(",") if item.strip()]
     if not tickers:
         raise ValueError("STOCK_LIST cannot be empty, for example: AVGO,AAPL,TSLA")
     return list(dict.fromkeys(tickers))

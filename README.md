@@ -24,6 +24,14 @@ STOCK_LIST=AVGO,AAPL,TSLA
 STOCK_A_LIST=NVDA,MSFT
 ```
 
+中国 A 股可直接写六位代码，程序会自动转换为 Yahoo Finance 格式：
+
+```text
+STOCK_A_LIST=600000,600036,000001,300750
+```
+
+其中 `6xxxxx` 会转为 `.SS`（上交所），`0xxxxx`／`3xxxxx` 会转为 `.SZ`（深交所），`4xxxxx`／`8xxxxx` 会转为 `.BJ`（北交所）。也可以自行填写完整代码，例如 `600000.SS`。
+
 也可以从 **Actions → 每日股票价格报告 → Run workflow** 临时输入股票清单。
 
 ## 设定寄信
