@@ -31,6 +31,7 @@ class Snapshot:
     ticker: str
     name: str
     date: str
+    trading_days: int
     open: float
     close: float
     high: float
@@ -39,13 +40,13 @@ class Snapshot:
     low_52w: float
     high_1w: float
     low_1w: float
-    change: float
-    sma20: float
-    sma50: float
-    rsi14: float
-    macd: float
-    macd_signal: float
-    macd_histogram: float
+    change: float | None
+    sma20: float | None
+    sma50: float | None
+    rsi14: float | None
+    macd: float | None
+    macd_signal: float | None
+    macd_histogram: float | None
     macd_status: str
     chart: Path
 
@@ -78,6 +79,12 @@ def rsi(close: pd.Series, period: int = 14) -> float:
     return float((100 - 100 / (1 + gains / losses)).iloc[-1])
 
 
+def last_rolling_value(close: pd.Series, period: int) -> float | None:
+    if len(close) < period:
+        return None
+    return float(close.rolling(period).mean().iloc[-1])
+
+
 def macd_values(close: pd.Series) -> tuple[pd.Series, pd.Series, pd.Series]:
     """Standard MACD: 12-period EMA minus 26-period EMA, with a 9-period signal."""
     macd = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
@@ -86,6 +93,8 @@ def macd_values(close: pd.Series) -> tuple[pd.Series, pd.Series, pd.Series]:
 
 
 def macd_status(macd: pd.Series, signal: pd.Series) -> str:
+    if len(macd) < 35:
+        return "数据不足"
     current, previous = macd.iloc[-1], macd.iloc[-2]
     signal_now, signal_previous = signal.iloc[-1], signal.iloc[-2]
     if current > signal_now and previous <= signal_previous:
@@ -104,8 +113,8 @@ def macd_status(macd: pd.Series, signal: pd.Series) -> str:
 def get_history(ticker: str) -> pd.DataFrame:
     data = yf.Ticker(ticker).history(period="1y", interval="1d", auto_adjust=False)
     data = data.dropna(subset=["Open", "High", "Low", "Close"])
-    if len(data) < 50:
-        raise RuntimeError("fewer than 50 daily trading rows were returned")
+    if data.empty:
+        raise RuntimeError("no daily trading rows were returned")
     return data
 
 
@@ -193,41 +202,55 @@ def snapshot(ticker: str) -> Snapshot:
     last = data.iloc[-1]
     week = data.tail(5)
     macd, signal, histogram = macd_values(data.Close)
+    enough_macd_history = len(data) >= 35
     return Snapshot(
         ticker=ticker,
         name=company_name(ticker),
         date=data.index[-1].strftime("%Y-%m-%d"),
+        trading_days=len(data),
         open=float(last.Open), close=float(last.Close), high=float(last.High), low=float(last.Low),
         high_52w=float(data.High.max()), low_52w=float(data.Low.min()),
         high_1w=float(week.High.max()), low_1w=float(week.Low.min()),
-        change=(float(last.Close) / float(data.Close.iloc[-2]) - 1) * 100,
-        sma20=float(data.Close.rolling(20).mean().iloc[-1]),
-        sma50=float(data.Close.rolling(50).mean().iloc[-1]),
-        rsi14=rsi(data.Close),
-        macd=float(macd.iloc[-1]), macd_signal=float(signal.iloc[-1]),
-        macd_histogram=float(histogram.iloc[-1]), macd_status=macd_status(macd, signal),
+        change=(float(last.Close) / float(data.Close.iloc[-2]) - 1) * 100 if len(data) >= 2 else None,
+        sma20=last_rolling_value(data.Close, 20),
+        sma50=last_rolling_value(data.Close, 50),
+        rsi14=rsi(data.Close) if len(data) >= 15 else None,
+        macd=float(macd.iloc[-1]) if enough_macd_history else None,
+        macd_signal=float(signal.iloc[-1]) if enough_macd_history else None,
+        macd_histogram=float(histogram.iloc[-1]) if enough_macd_history else None,
+        macd_status=macd_status(macd, signal),
         chart=draw_chart(ticker, data),
     )
 
 
-def price(value: float) -> str:
+def price(value: float | None) -> str:
+    if value is None or pd.isna(value):
+        return "—"
     return f"{value:,.2f}"
+
+
+def decimal(value: float | None, digits: int = 1) -> str:
+    if value is None or pd.isna(value):
+        return "—"
+    return f"{value:.{digits}f}"
 
 
 def html_report(items: list[Snapshot], failed: list[str], label: str) -> str:
     rows = []
     for item in items:
-        color = "#15803d" if item.change >= 0 else "#b91c1c"
+        color = "#15803d" if item.change is not None and item.change >= 0 else "#b91c1c"
         macd_color = "#15803d" if "↑" in item.macd_status else "#b91c1c"
+        change = "—" if item.change is None else f"{item.change:+.2f}%"
+        macd = " / ".join([decimal(item.macd, 2), decimal(item.macd_signal, 2), decimal(item.macd_histogram, 2)])
         rows.append(
             f"<tr><td><b>{html.escape(item.ticker)}</b></td><td>{html.escape(item.name)}</td><td>{item.date}</td>"
             f"<td>{price(item.open)}</td><td><b>{price(item.close)}</b></td>"
-            f"<td style='color:{color}'>{item.change:+.2f}%</td>"
+            f"<td style='color:{color}'>{change}</td>"
             f"<td>{price(item.high)} / {price(item.low)}</td>"
             f"<td>{price(item.high_52w)} / {price(item.low_52w)}</td>"
             f"<td>{price(item.high_1w)} / {price(item.low_1w)}</td>"
-            f"<td>{price(item.sma20)} / {price(item.sma50)}</td><td>{item.rsi14:.1f}</td>"
-            f"<td>{item.macd:.2f} / {item.macd_signal:.2f} / {item.macd_histogram:.2f}</td>"
+            f"<td>{price(item.sma20)} / {price(item.sma50)}</td><td>{decimal(item.rsi14)}</td>"
+            f"<td>{macd}</td>"
             f"<td style='color:{macd_color}'><b>{item.macd_status}</b></td></tr>"
         )
     charts = "".join(
@@ -235,6 +258,8 @@ def html_report(items: list[Snapshot], failed: list[str], label: str) -> str:
         for item in items
     )
     problems = "" if not failed else f"<p class='warning'>未能取得：{html.escape('；'.join(failed))}</p>"
+    limited = [f"{item.ticker}（仅 {item.trading_days} 个交易日）" for item in items if item.trading_days < 252]
+    coverage_note = "" if not limited else f"<p class='warning'>历史数据不足一年：{html.escape('；'.join(limited))}。已显示可取得的价格；52 周高／低为现有区间，长周期指标会显示“—”。</p>"
     now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
     return f"""<!doctype html><html><head><meta charset='utf-8'><style>
 body {{font-family:Arial,'Microsoft JhengHei',sans-serif;color:#1f2937;margin:24px}} .muted{{color:#6b7280}}
@@ -242,8 +267,8 @@ table{{width:100%;border-collapse:collapse;font-size:13px;margin:20px 0}} th{{ba
 td{{border-bottom:1px solid #e5e7eb;text-align:right;padding:9px 8px;white-space:nowrap}} th:first-child,th:nth-child(2),td:first-child,td:nth-child(2){{text-align:left}}
 tr:nth-child(even){{background:#f8fafc}} img{{width:100%;max-width:960px;border:1px solid #e5e7eb;border-radius:8px}} section{{margin-top:30px}}
 .warning{{color:#b45309;background:#fffbeb;padding:10px;border-radius:6px}}
-</style></head><body><h1>{html.escape(label)} 股票价格日报</h1><p class='muted'>生成时间：{now}（数据为最近可用交易日收盘数据）</p>{problems}
-<table><thead><tr><th>代码</th><th>公司名称</th><th>交易日</th><th>开盘</th><th>收盘</th><th>日涨跌</th><th>日高 / 日低</th><th>52 周高 / 低</th><th>1 周高 / 低</th><th>SMA20 / SMA50</th><th>RSI14</th><th>MACD / Signal / 柱</th><th>MACD 状态</th></tr></thead><tbody>{''.join(rows)}</tbody></table>{charts}</body></html>"""
+</style></head><body><h1>{html.escape(label)} 股票价格日报</h1><p class='muted'>生成时间：{now}（数据为最近可用交易日收盘数据）</p>{problems}{coverage_note}
+<table><thead><tr><th>代码</th><th>公司名称</th><th>交易日</th><th>开盘</th><th>收盘</th><th>日涨跌</th><th>日高 / 日低</th><th>52 周高 / 低*</th><th>1 周高 / 低</th><th>SMA20 / SMA50</th><th>RSI14</th><th>MACD / Signal / 柱</th><th>MACD 状态</th></tr></thead><tbody>{''.join(rows)}</tbody></table>{charts}</body></html>"""
 
 
 def send_mail(subject: str, body: str, items: list[Snapshot]) -> None:
