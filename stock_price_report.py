@@ -110,10 +110,22 @@ def get_history(ticker: str) -> pd.DataFrame:
 
 
 def company_name(ticker: str) -> str:
-    """Return a Chinese A-share name from Eastmoney, with a safe Yahoo fallback."""
+    """Return a Chinese A-share name from Tencent, with safe fallbacks."""
     match = re.fullmatch(r"(\d{6})\.(SS|SZ|BJ)", ticker)
     if match:
         code, exchange = match.groups()
+        prefix = {"SS": "sh", "SZ": "sz", "BJ": "bj"}[exchange]
+        try:
+            response = requests.get(
+                f"https://qt.gtimg.cn/q={prefix}{code}",
+                headers={"Referer": "https://gu.qq.com", "User-Agent": "Mozilla/5.0"},
+                timeout=8,
+            )
+            fields = response.content.decode("gbk", errors="replace").split('"')[1].split("~")
+            if len(fields) > 1 and fields[1]:
+                return fields[1]
+        except (requests.RequestException, UnicodeDecodeError, IndexError):
+            pass
         market = "1" if exchange == "SS" else "0"
         try:
             response = requests.get(
