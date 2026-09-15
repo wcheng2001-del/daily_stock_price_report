@@ -14,6 +14,7 @@ from pathlib import Path
 
 import matplotlib
 import pandas as pd
+import requests
 import yfinance as yf
 
 matplotlib.use("Agg")
@@ -28,6 +29,7 @@ CHART_DIR = REPORT_DIR / "charts"
 @dataclass
 class Snapshot:
     ticker: str
+    name: str
     date: str
     open: float
     close: float
@@ -107,6 +109,30 @@ def get_history(ticker: str) -> pd.DataFrame:
     return data
 
 
+def company_name(ticker: str) -> str:
+    """Return a Chinese A-share name from Eastmoney, with a safe Yahoo fallback."""
+    match = re.fullmatch(r"(\d{6})\.(SS|SZ|BJ)", ticker)
+    if match:
+        code, exchange = match.groups()
+        market = "1" if exchange == "SS" else "0"
+        try:
+            response = requests.get(
+                "https://push2.eastmoney.com/api/qt/stock/get",
+                params={"secid": f"{market}.{code}", "fields": "f58"},
+                timeout=8,
+            )
+            name = response.json().get("data", {}).get("f58")
+            if name:
+                return str(name)
+        except (requests.RequestException, ValueError, AttributeError):
+            pass
+    try:
+        info = yf.Ticker(ticker).get_info()
+        return str(info.get("longName") or info.get("shortName") or ticker)
+    except Exception:
+        return ticker
+
+
 def draw_chart(ticker: str, data: pd.DataFrame) -> Path:
     daily = data.tail(63).copy()
     daily["SMA20"] = data["Close"].rolling(20).mean().tail(63)
@@ -157,6 +183,7 @@ def snapshot(ticker: str) -> Snapshot:
     macd, signal, histogram = macd_values(data.Close)
     return Snapshot(
         ticker=ticker,
+        name=company_name(ticker),
         date=data.index[-1].strftime("%Y-%m-%d"),
         open=float(last.Open), close=float(last.Close), high=float(last.High), low=float(last.Low),
         high_52w=float(data.High.max()), low_52w=float(data.Low.min()),
@@ -181,7 +208,7 @@ def html_report(items: list[Snapshot], failed: list[str], label: str) -> str:
         color = "#15803d" if item.change >= 0 else "#b91c1c"
         macd_color = "#15803d" if "↑" in item.macd_status else "#b91c1c"
         rows.append(
-            f"<tr><td><b>{html.escape(item.ticker)}</b></td><td>{item.date}</td>"
+            f"<tr><td><b>{html.escape(item.ticker)}</b></td><td>{html.escape(item.name)}</td><td>{item.date}</td>"
             f"<td>{price(item.open)}</td><td><b>{price(item.close)}</b></td>"
             f"<td style='color:{color}'>{item.change:+.2f}%</td>"
             f"<td>{price(item.high)} / {price(item.low)}</td>"
@@ -204,7 +231,7 @@ td{{border-bottom:1px solid #e5e7eb;text-align:right;padding:9px 8px;white-space
 tr:nth-child(even){{background:#f8fafc}} img{{width:100%;max-width:960px;border:1px solid #e5e7eb;border-radius:8px}} section{{margin-top:30px}}
 .warning{{color:#b45309;background:#fffbeb;padding:10px;border-radius:6px}}
 </style></head><body><h1>{html.escape(label)} 股票价格日报</h1><p class='muted'>生成时间：{now}（数据为最近可用交易日收盘数据）</p>{problems}
-<table><thead><tr><th>代码</th><th>交易日</th><th>开盘</th><th>收盘</th><th>日涨跌</th><th>日高 / 日低</th><th>52 周高 / 低</th><th>1 周高 / 低</th><th>SMA20 / SMA50</th><th>RSI14</th><th>MACD / Signal / 柱</th><th>MACD 状态</th></tr></thead><tbody>{''.join(rows)}</tbody></table>{charts}</body></html>"""
+<table><thead><tr><th>代码</th><th>公司名称</th><th>交易日</th><th>开盘</th><th>收盘</th><th>日涨跌</th><th>日高 / 日低</th><th>52 周高 / 低</th><th>1 周高 / 低</th><th>SMA20 / SMA50</th><th>RSI14</th><th>MACD / Signal / 柱</th><th>MACD 状态</th></tr></thead><tbody>{''.join(rows)}</tbody></table>{charts}</body></html>"""
 
 
 def send_mail(subject: str, body: str, items: list[Snapshot]) -> None:
