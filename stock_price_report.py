@@ -110,9 +110,40 @@ def macd_status(macd: pd.Series, signal: pd.Series) -> str:
     return "转弱 ↓"
 
 
+def append_latest_intraday_session(yahoo_ticker: yf.Ticker, daily: pd.DataFrame) -> pd.DataFrame:
+    """Append today's OHLC from minute bars when Yahoo's daily endpoint is delayed."""
+    try:
+        intraday = yahoo_ticker.history(period="5d", interval="1m", auto_adjust=False, prepost=False)
+        intraday = intraday.dropna(subset=["Open", "High", "Low", "Close"])
+        if intraday.empty:
+            return daily
+        latest_date = max(intraday.index.date)
+        if latest_date <= daily.index[-1].date():
+            return daily
+        session = intraday[intraday.index.date == latest_date]
+        values = {
+            "Open": session["Open"].iloc[0],
+            "High": session["High"].max(),
+            "Low": session["Low"].min(),
+            "Close": session["Close"].iloc[-1],
+            "Volume": session["Volume"].sum(),
+        }
+        row = pd.DataFrame([{column: values.get(column, 0) for column in daily.columns}])
+        timestamp = pd.Timestamp(latest_date)
+        if daily.index.tz is not None:
+            timestamp = timestamp.tz_localize(daily.index.tz)
+        row.index = pd.DatetimeIndex([timestamp])
+        return pd.concat([daily, row]).sort_index()
+    except Exception:
+        return daily
+
+
 def get_history(ticker: str) -> pd.DataFrame:
-    data = yf.Ticker(ticker).history(period="1y", interval="1d", auto_adjust=False)
+    yahoo_ticker = yf.Ticker(ticker)
+    data = yahoo_ticker.history(period="1y", interval="1d", auto_adjust=False)
     data = data.dropna(subset=["Open", "High", "Low", "Close"])
+    if not data.empty:
+        data = append_latest_intraday_session(yahoo_ticker, data)
     if data.empty:
         raise RuntimeError("no daily trading rows were returned")
     return data
