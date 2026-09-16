@@ -8,10 +8,9 @@ on:
         required: false
         type: string
   schedule:
-    # 北京时间周一至周五 07:00（UTC 前一天 23:00）
-    #- cron: '0 23 * * 0,1,2,3,4'
-    # 加州周一至周五 15:30（PDT）
-    - cron: '30 22 * * 1-5'
+    # 加州周一至周五 02:47；时区会自动处理夏令／冬令时间。
+    - cron: '47 2 * * 1-5'
+      timezone: 'America/Los_Angeles'
 permissions:
   contents: read
 
