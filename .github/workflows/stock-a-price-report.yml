@@ -8,9 +8,9 @@ on:
         required: false
         type: string
   schedule:
-    # 加州周一至周五 02:47；时区会自动处理夏令／冬令时间。
-    - cron: '47 2 * * 1-5'
-      timezone: 'America/Los_Angeles'
+    # 中国周一至周五 21:38。
+    - cron: '38 21 * * 1-5'
+      timezone: 'Asia/Shanghai'
 permissions:
   contents: read
 
