@@ -52,13 +52,13 @@ class Snapshot:
 
 
 def normalize_yahoo_ticker(ticker: str) -> str:
-    """Add Yahoo Finance exchange suffixes for unqualified Chinese A-share codes."""
+    """Add Yahoo Finance exchange suffixes for unqualified Chinese stock and ETF codes."""
     symbol = ticker.strip().upper()
     if not re.fullmatch(r"\d{6}", symbol):
         return symbol
-    if symbol.startswith("6"):
+    if symbol.startswith(("5", "6")):
         return f"{symbol}.SS"  # Shanghai Stock Exchange
-    if symbol.startswith(("0", "3")):
+    if symbol.startswith(("0", "1", "3")):
         return f"{symbol}.SZ"  # Shenzhen Stock Exchange
     if symbol.startswith(("4", "8")):
         return f"{symbol}.BJ"  # Beijing Stock Exchange
