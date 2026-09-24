@@ -1,0 +1,48 @@
+name: STOCK_US
+
+on:
+  workflow_dispatch:
+    inputs:
+      stock_list:
+        description: "股票代码，以逗号分隔；留空则使用 STOCK_US_LIST"
+        required: false
+        type: string
+  schedule:
+    # 加州周一至周五 15:30；时区会自动处理夏令／冬令时间。
+    - cron: '30 15 * * 1-5'
+      timezone: 'America/Los_Angeles'
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      STOCK_LIST: ${{ inputs.stock_list || vars.STOCK_US_LIST || 'AVGO' }}
+      REPORT_LABEL: STOCK_US
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      EMAIL_TO: ${{ secrets.EMAIL_TO }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+      - name: 生成并寄送 STOCK_US 价格报告
+        run: python stock_price_report.py --send-email
+      - name: 保存报告与图表
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stock-us-price-reports-${{ github.run_number }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 14
